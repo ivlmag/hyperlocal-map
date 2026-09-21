@@ -21,6 +21,10 @@ button, input { font: inherit; }
 .info-close:hover, .info-close:focus-visible { background: #edf2ee; color: var(--ink); outline: none; }
 .help-image { width: 30px; height: 30px; flex: 0 0 30px; object-fit: contain; border: 0; border-radius: 0; }
 .hidden, .is-hidden { display: none; }
+.info-photo-wrap { width: 100%; margin: 0 0 12px; }
+.info-photo-wrap.is-cropped { position: relative; overflow: hidden; }
+.info-photo { display: block; max-width: 100%; height: auto; max-height: 360px; object-fit: contain; }
+.info-photo-wrap.is-cropped .info-photo { position: absolute; max-width: none; max-height: none; object-fit: initial; }
 .info-card p { margin: 0; color: #43514c; font-size: 13px; line-height: 1.55; white-space: pre-wrap; max-height: 270px; overflow: auto; }
 .footer { height: 34px; flex: 0 0 34px; display: flex; justify-content: flex-end; align-items: center; gap: 4px; padding: 0 24px; color: var(--muted); font-size: 10px; background: rgba(250,252,249,.96); border-top: 1px solid var(--line); }
 .footer a { color: inherit; }

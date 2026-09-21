@@ -37,13 +37,71 @@
     return [streetKey(street), parts.house, parts.structure, parts.corpus, parts.ownership].join('\u001f');
   }
 
-  function setInfo(title, text, withImage) {
+  function normalisePhotoCrop(value) {
+    try {
+      const crop = typeof value === 'string' ? JSON.parse(value) : value;
+      const left = Number(crop.left); const top = Number(crop.top);
+      const right = Number(crop.right); const bottom = Number(crop.bottom);
+      if (left >= 0 && top >= 0 && right <= 1 && bottom <= 1 && right > left && bottom > top) {
+        return { left, top, right, bottom };
+      }
+    } catch (_) { /* Old exports may not contain a crop. */ }
+    return null;
+  }
+
+  function renderInfoPhoto(url, rawCrop) {
+    const wrap = $('info-photo-wrap');
+    const photo = $('info-photo');
+    const crop = normalisePhotoCrop(rawCrop);
+    state.currentPhoto = url ? { url, crop } : null;
+    photo.onload = null; photo.onerror = null;
+    wrap.className = 'info-photo-wrap hidden';
+    wrap.removeAttribute('style');
+    photo.removeAttribute('style');
+    if (!url) { photo.removeAttribute('src'); return; }
+
+    wrap.classList.remove('hidden');
+    photo.dataset.photoUrl = url;
+    photo.alt = 'Фото здания';
+    photo.onerror = () => {
+      if (photo.dataset.photoUrl === url) wrap.classList.add('hidden');
+    };
+    photo.onload = () => {
+      if (photo.dataset.photoUrl !== url) return;
+      // Без выбранного кадра показываем исходное фото целиком. При наличии
+      // кадра выводим ровно выделенный пользователем прямоугольник — без
+      // дополнительной автоматической обрезки.
+      if (!crop) return;
+      const cropWidth = crop.right - crop.left;
+      const cropHeight = crop.bottom - crop.top;
+      let viewportWidth = wrap.parentElement.clientWidth;
+      let viewportHeight = viewportWidth * cropHeight / cropWidth;
+      const maxHeight = 360;
+      if (viewportHeight > maxHeight) {
+        viewportHeight = maxHeight;
+        viewportWidth = viewportHeight * cropWidth / cropHeight;
+      }
+      const imageWidth = viewportWidth / cropWidth;
+      const imageHeight = imageWidth * photo.naturalHeight / photo.naturalWidth;
+      wrap.classList.add('is-cropped');
+      wrap.style.width = `${Math.round(viewportWidth)}px`;
+      wrap.style.height = `${Math.round(viewportHeight)}px`;
+      photo.style.width = `${Math.round(imageWidth)}px`;
+      photo.style.height = `${Math.round(imageHeight)}px`;
+      photo.style.left = `${Math.round(-crop.left * imageWidth)}px`;
+      photo.style.top = `${Math.round(-crop.top * imageHeight)}px`;
+    };
+    photo.src = url;
+  }
+
+  function setInfo(title, text, withImage, photoUrl = '', photoCrop = '') {
     const card = $('info-card');
     card.classList.remove('is-hidden');
     card.setAttribute('aria-hidden', 'false');
     $('info-title').textContent = title;
     $('info-text').textContent = text;
     $('info-image').classList.toggle('hidden', !withImage);
+    renderInfoPhoto(photoUrl, photoCrop);
   }
 
   async function reverse(lat, lon) {
@@ -110,7 +168,7 @@
     const address = record?.address || [street, house].filter(Boolean).join(', ') || fallbackName || 'Адрес не распознан';
     if (record) {
       const text = record.help_text.trim() || 'Запись найдена в локальной БД.\n\nСправка для этого адреса пока не заполнена.';
-      setInfo(address, text, Boolean(record.help_text.trim()));
+      setInfo(address, text, Boolean(record.help_text.trim()), record.photo_url, record.photo_crop);
     } else {
       setInfo(address, 'Для этого адреса записи в выгрузке нет.', false);
     }
@@ -189,8 +247,11 @@
     }
     const streets = data.streets || [];
     for (const row of data.records || []) {
-      const [streetIndex, house, structure, corpus, ownership, address, helpText, updatedAt] = row;
-      state.records.set([streets[streetIndex] || '', house, structure, corpus, ownership].join('\u001f'), { address, help_text: helpText || '', updated_at: updatedAt || '' });
+      const [streetIndex, house, structure, corpus, ownership, address, helpText, updatedAt, photoUrl, photoCrop] = row;
+      state.records.set([streets[streetIndex] || '', house, structure, corpus, ownership].join('\u001f'), {
+        address, help_text: helpText || '', updated_at: updatedAt || '',
+        photo_url: photoUrl || '', photo_crop: photoCrop || ''
+      });
     }
   }
 
