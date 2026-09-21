@@ -74,8 +74,12 @@
       if (!crop) return;
       const cropWidth = crop.right - crop.left;
       const cropHeight = crop.bottom - crop.top;
-      let viewportWidth = wrap.parentElement.clientWidth;
-      let viewportHeight = viewportWidth * cropHeight / cropWidth;
+      // clientWidth самого блока — это фактическая ширина внутри отступов
+      // карточки. Родительская clientWidth была больше и выпускала фото наружу.
+      let viewportWidth = wrap.clientWidth;
+      // Пропорции выбранного прямоугольника зависят и от исходного фото.
+      // Так его высота точно заканчивается у нижней границы кадра, без пустоты.
+      let viewportHeight = viewportWidth * cropHeight * photo.naturalHeight / (cropWidth * photo.naturalWidth);
       const maxHeight = 360;
       if (viewportHeight > maxHeight) {
         viewportHeight = maxHeight;

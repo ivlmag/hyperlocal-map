@@ -21,7 +21,7 @@ button, input { font: inherit; }
 .info-close:hover, .info-close:focus-visible { background: #edf2ee; color: var(--ink); outline: none; }
 .help-image { width: 30px; height: 30px; flex: 0 0 30px; object-fit: contain; border: 0; border-radius: 0; }
 .hidden, .is-hidden { display: none; }
-.info-photo-wrap { width: 100%; margin: 0 0 12px; }
+.info-photo-wrap { width: 100%; margin: 0 0 6px; }
 .info-photo-wrap.is-cropped { position: relative; overflow: hidden; }
 .info-photo { display: block; max-width: 100%; height: auto; max-height: 360px; object-fit: contain; }
 .info-photo-wrap.is-cropped .info-photo { position: absolute; max-width: none; max-height: none; object-fit: initial; }
