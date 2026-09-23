@@ -1,10 +1,18 @@
 (function () {
   'use strict';
 
-  // Стиль Liberty уже содержит официальный слой building-3d.
-  const STYLE = 'https://tiles.openfreemap.org/styles/liberty';
-  const MOSCOW = [37.6173, 55.7558];
-  const state = { map: null, marker: null, records: new Map(), userMarker: null, userCentered: false };
+  const MOSCOW = [55.7558, 37.6173];
+  const state = {
+    map: null,
+    marker: null,
+    records: new Map(),
+    loading: false,
+    lastMapClickAt: -Infinity,
+    userLocationMarker: null,
+    userAccuracyCircle: null,
+    userLocationCentered: false,
+    geolocationWatchId: null
+  };
   const $ = (id) => document.getElementById(id);
 
   function streetKey(value) {
@@ -25,81 +33,171 @@
   }
 
   function recordKey(street, house) {
-    const part = splitHouse(house);
-    return [streetKey(street), part.house, part.structure, part.corpus, part.ownership].join('\u001f');
+    const parts = splitHouse(house);
+    return [streetKey(street), parts.house, parts.structure, parts.corpus, parts.ownership].join('\u001f');
   }
 
-  function parseCrop(value) {
+  function normalisePhotoCrop(value) {
     try {
       const crop = typeof value === 'string' ? JSON.parse(value) : value;
-      if (Number(crop.left) >= 0 && Number(crop.top) >= 0 && Number(crop.right) <= 1 && Number(crop.bottom) <= 1 && Number(crop.right) > Number(crop.left) && Number(crop.bottom) > Number(crop.top)) return crop;
-    } catch (_) {}
+      const left = Number(crop.left); const top = Number(crop.top);
+      const right = Number(crop.right); const bottom = Number(crop.bottom);
+      if (left >= 0 && top >= 0 && right <= 1 && bottom <= 1 && right > left && bottom > top) {
+        return { left, top, right, bottom };
+      }
+    } catch (_) { /* Old exports may not contain a crop. */ }
     return null;
   }
 
   function renderInfoPhoto(url, rawCrop) {
-    const wrap = $('info-photo-wrap'), photo = $('info-photo'), crop = parseCrop(rawCrop);
-    photo.onload = null; photo.onerror = null; wrap.className = 'info-photo-wrap hidden';
-    wrap.removeAttribute('style'); photo.removeAttribute('style');
+    const wrap = $('info-photo-wrap');
+    const photo = $('info-photo');
+    const crop = normalisePhotoCrop(rawCrop);
+    state.currentPhoto = url ? { url, crop } : null;
+    photo.onload = null; photo.onerror = null;
+    wrap.className = 'info-photo-wrap hidden';
+    wrap.removeAttribute('style');
+    photo.removeAttribute('style');
     if (!url) { photo.removeAttribute('src'); return; }
-    wrap.classList.remove('hidden'); photo.dataset.photoUrl = url; photo.alt = 'Фото здания';
-    photo.onerror = () => { if (photo.dataset.photoUrl === url) wrap.classList.add('hidden'); };
+
+    wrap.classList.remove('hidden');
+    photo.dataset.photoUrl = url;
+    photo.alt = 'Фото здания';
+    photo.onerror = () => {
+      if (photo.dataset.photoUrl === url) wrap.classList.add('hidden');
+    };
     photo.onload = () => {
-      if (photo.dataset.photoUrl !== url || !crop) return;
-      const cropWidth = Number(crop.right) - Number(crop.left), cropHeight = Number(crop.bottom) - Number(crop.top);
-      let width = wrap.clientWidth, height = width * cropHeight * photo.naturalHeight / (cropWidth * photo.naturalWidth);
-      if (height > 360) { height = 360; width = height * cropWidth / cropHeight; }
-      const imageWidth = width / cropWidth, imageHeight = imageWidth * photo.naturalHeight / photo.naturalWidth;
-      wrap.classList.add('is-cropped'); wrap.style.width = Math.round(width) + 'px'; wrap.style.height = Math.round(height) + 'px';
-      photo.style.width = Math.round(imageWidth) + 'px'; photo.style.height = Math.round(imageHeight) + 'px';
-      photo.style.left = Math.round(-Number(crop.left) * imageWidth) + 'px'; photo.style.top = Math.round(-Number(crop.top) * imageHeight) + 'px';
+      if (photo.dataset.photoUrl !== url) return;
+      // Без выбранного кадра показываем исходное фото целиком. При наличии
+      // кадра выводим ровно выделенный пользователем прямоугольник — без
+      // дополнительной автоматической обрезки.
+      if (!crop) return;
+      const cropWidth = crop.right - crop.left;
+      const cropHeight = crop.bottom - crop.top;
+      // clientWidth самого блока — это фактическая ширина внутри отступов
+      // карточки. Родительская clientWidth была больше и выпускала фото наружу.
+      let viewportWidth = wrap.clientWidth;
+      // Пропорции выбранного прямоугольника зависят и от исходного фото.
+      // Так его высота точно заканчивается у нижней границы кадра, без пустоты.
+      let viewportHeight = viewportWidth * cropHeight * photo.naturalHeight / (cropWidth * photo.naturalWidth);
+      const maxHeight = 360;
+      if (viewportHeight > maxHeight) {
+        viewportHeight = maxHeight;
+        viewportWidth = viewportHeight * cropWidth / cropHeight;
+      }
+      const imageWidth = viewportWidth / cropWidth;
+      const imageHeight = imageWidth * photo.naturalHeight / photo.naturalWidth;
+      wrap.classList.add('is-cropped');
+      wrap.style.width = `${Math.round(viewportWidth)}px`;
+      wrap.style.height = `${Math.round(viewportHeight)}px`;
+      photo.style.width = `${Math.round(imageWidth)}px`;
+      photo.style.height = `${Math.round(imageHeight)}px`;
+      photo.style.left = `${Math.round(-crop.left * imageWidth)}px`;
+      photo.style.top = `${Math.round(-crop.top * imageHeight)}px`;
     };
     photo.src = url;
   }
 
-  function setInfo(title, text, showHelpImage, photoUrl = '', photoCrop = '') {
+  function setInfo(title, text, withImage, photoUrl = '', photoCrop = '') {
     const card = $('info-card');
-    card.classList.remove('is-hidden'); card.setAttribute('aria-hidden', 'false');
-    $('info-title').textContent = title; $('info-text').textContent = text;
-    $('info-image').classList.toggle('hidden', !showHelpImage);
+    card.classList.remove('is-hidden');
+    card.setAttribute('aria-hidden', 'false');
+    $('info-title').textContent = title;
+    $('info-text').textContent = text;
+    $('info-image').classList.toggle('hidden', !withImage);
     renderInfoPhoto(photoUrl, photoCrop);
-  }
-
-  function markerElement(imageUrl, className, width, height) {
-    const element = document.createElement('div');
-    element.className = className; element.style.width = width + 'px'; element.style.height = height + 'px';
-    element.style.backgroundImage = 'url("' + imageUrl.replace(/"/g, '\\"') + '")';
-    return element;
-  }
-
-  function addClickMarker(lng, lat) {
-    state.marker?.remove();
-    state.marker = new maplibregl.Marker({ element: markerElement('./help-image.png', 'map-pin', 30, 30), anchor: 'bottom' }).setLngLat([lng, lat]).addTo(state.map);
   }
 
   async function reverse(lat, lon) {
     const params = new URLSearchParams({ format: 'jsonv2', lat, lon, zoom: '18', layer: 'address', addressdetails: '1', 'accept-language': 'ru' });
-    const response = await fetch('https://nominatim.openstreetmap.org/reverse?' + params);
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?${params}`);
     return response.ok ? response.json() : null;
   }
 
-  function showAddress(street, house, fallbackName) {
-    const record = state.records.get(recordKey(street, house));
-    const address = record?.address || [street, house].filter(Boolean).join(', ') || fallbackName || 'Адрес не распознан';
-    if (!record) return setInfo(address, 'Для этого адреса записи в выгрузке нет.', false);
-    const text = record.help_text.trim() || 'Запись найдена в локальной БД.\n\nСправка для этого адреса пока не заполнена.';
-    setInfo(address, text, Boolean(record.help_text.trim()), record.photo_url, record.photo_crop);
+  function lookup(street, house) {
+    return state.records.get(recordKey(street, house)) || null;
   }
 
-  async function handleClick(lng, lat, resolvedAddress) {
-    addClickMarker(lng, lat); setInfo('Точка клика', 'Определяю адрес и ищу его в выгрузке…', false);
+  function userLocationIcon() {
+    return L.icon({
+      iconUrl: './assets/user-location.png',
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+      className: 'user-location-marker'
+    });
+  }
+
+  function updateUserLocation(position) {
+    const latitude = Number(position.coords.latitude);
+    const longitude = Number(position.coords.longitude);
+    const accuracy = Math.max(1, Number(position.coords.accuracy) || 1);
+    const coordinates = [latitude, longitude];
+
+    if (state.userLocationMarker) state.userLocationMarker.setLatLng(coordinates);
+    else state.userLocationMarker = L.marker(coordinates, {
+      icon: userLocationIcon(),
+      interactive: false,
+      keyboard: false,
+      zIndexOffset: 1000
+    }).addTo(state.map);
+
+    if (state.userAccuracyCircle) state.userAccuracyCircle.setLatLng(coordinates).setRadius(accuracy);
+    else state.userAccuracyCircle = L.circle(coordinates, {
+      radius: accuracy,
+      interactive: false,
+      color: '#27675b',
+      weight: 1,
+      opacity: 0.35,
+      fillColor: '#27675b',
+      fillOpacity: 0.08
+    }).addTo(state.map);
+
+    if (!state.userLocationCentered) {
+      state.map.setView(coordinates, 18, { animate: true });
+      state.userLocationCentered = true;
+    }
+  }
+
+  function startUserGeolocation() {
+    if (!navigator.geolocation) return;
+    state.geolocationWatchId = navigator.geolocation.watchPosition(
+      updateUserLocation,
+      () => { /* Permission can be declined; the map remains fully usable. */ },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
+    );
+  }
+
+  function showAddress(street, house, fallbackName) {
+    const record = lookup(street, house);
+    const address = record?.address || [street, house].filter(Boolean).join(', ') || fallbackName || 'Адрес не распознан';
+    if (record) {
+      const text = record.help_text.trim() || 'Запись найдена в локальной БД.\n\nСправка для этого адреса пока не заполнена.';
+      setInfo(address, text, Boolean(record.help_text.trim()), record.photo_url, record.photo_crop);
+    } else {
+      setInfo(address, 'Для этого адреса записи в выгрузке нет.', false);
+    }
+  }
+
+  async function handleClick(event) {
+    const lat = Number(event.latlng.lat.toFixed(6));
+    const lon = Number(event.latlng.lng.toFixed(6));
+    state.marker?.remove();
+    state.marker = L.marker([lat, lon], { icon: L.icon({ iconUrl: './help-image.png', iconSize: [30, 30], iconAnchor: [15, 27], popupAnchor: [0, -27] }) }).addTo(state.map);
+    setInfo('Точка клика', 'Определяю адрес и ищу его в выгрузке…', false);
     try {
-      if (resolvedAddress?.street && resolvedAddress?.house) return showAddress(resolvedAddress.street, resolvedAddress.house, '');
-      const payload = await reverse(lat, lng), address = payload?.address || {};
-      const street = String(address.road || address.pedestrian || address.residential || '').trim(), house = String(address.house_number || '').trim();
+      if (event.resolvedAddress?.street && event.resolvedAddress?.house) {
+        showAddress(event.resolvedAddress.street, event.resolvedAddress.house, '');
+        return;
+      }
+      const payload = await reverse(lat, lon);
+      const address = payload?.address || {};
+      const street = String(address.road || address.pedestrian || address.residential || '').trim();
+      const house = String(address.house_number || '').trim();
       if (street && house) showAddress(street, house, payload?.display_name);
       else setInfo('Точка клика', 'Кликните по контуру здания — адрес не определён.', false);
-    } catch (_) { setInfo('Точка клика', 'Не удалось определить адрес. Проверьте подключение к сервису карт и попробуйте ещё раз.', false); }
+    } catch (_) {
+      setInfo('Точка клика', 'Не удалось определить адрес. Проверьте подключение к сервису карт и попробуйте ещё раз.', false);
+    }
   }
 
   async function search(event) {
@@ -109,44 +207,76 @@
     setInfo('Поиск', 'Ищу адрес…', false);
     try {
       const params = new URLSearchParams({ format: 'jsonv2', q: query, limit: '1', addressdetails: '1', 'accept-language': 'ru', countrycodes: 'ru' });
-      const response = await fetch('https://nominatim.openstreetmap.org/search?' + params);
-      const first = (response.ok ? await response.json() : [])[0];
+      const response = await fetch(`https://nominatim.openstreetmap.org/search?${params}`);
+      const results = response.ok ? await response.json() : [];
+      const first = results[0];
       if (!first?.lat || !first.lon) throw new Error('not found');
-      const lat = Number(first.lat), lng = Number(first.lon), address = first.address || {};
-      const street = String(address.road || address.pedestrian || address.residential || '').trim(), house = String(address.house_number || '').trim();
-      state.map.flyTo({ center: [lng, lat], zoom: 17, pitch: 12, bearing: 0, essential: true });
-      await handleClick(lng, lat, { street, house });
+      const address = first.address || {};
+      const street = String(address.road || address.pedestrian || address.residential || '').trim();
+      const house = String(address.house_number || '').trim();
+      state.map.setView([Number(first.lat), Number(first.lon)], 17);
+      await handleClick({ latlng: { lat: Number(first.lat), lng: Number(first.lon) }, resolvedAddress: { street, house } });
     } catch (_) { setInfo('Поиск', 'Адрес не найден. Уточните запрос.', false); }
   }
 
-  function updateUserLocation(position) {
-    const lat = Number(position.coords.latitude), lng = Number(position.coords.longitude);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    if (state.userMarker) state.userMarker.setLngLat([lng, lat]);
-    else state.userMarker = new maplibregl.Marker({ element: markerElement('./assets/user-location.png', 'user-location-marker', 24, 24), anchor: 'center' }).setLngLat([lng, lat]).addTo(state.map);
-    if (!state.userCentered) { state.map.flyTo({ center: [lng, lat], zoom: 18, pitch: 12, bearing: 0, essential: true }); state.userCentered = true; }
+  function installTouchFallback() {
+    const container = state.map.getContainer();
+    let touchStart = null;
+    container.addEventListener('touchstart', (event) => {
+      if (event.touches.length !== 1) { touchStart = null; return; }
+      const touch = event.touches[0];
+      touchStart = { x: touch.clientX, y: touch.clientY };
+    }, { passive: true });
+    container.addEventListener('touchend', (event) => {
+      if (!touchStart || event.changedTouches.length !== 1) return;
+      const touch = event.changedTouches[0];
+      const moved = Math.hypot(touch.clientX - touchStart.x, touch.clientY - touchStart.y);
+      touchStart = null;
+      if (moved > 14) return;
+      const point = { clientX: touch.clientX, clientY: touch.clientY };
+      window.setTimeout(() => {
+        if (performance.now() - state.lastMapClickAt < 700) return;
+        const latlng = state.map.mouseEventToLatLng(point);
+        handleClick({ latlng });
+      }, 250);
+    }, { passive: true });
   }
 
   async function loadData() {
     let data = window.HYPERLOCAL_DATA;
-    if (!data) { const response = await fetch('./data/buildings.json', { cache: 'no-cache' }); if (!response.ok) throw new Error('data'); data = await response.json(); }
+    if (!data) {
+      const response = await fetch('./data/buildings.json', { cache: 'no-cache' });
+      if (!response.ok) throw new Error('data');
+      data = await response.json();
+    }
     const streets = data.streets || [];
     for (const row of data.records || []) {
       const [streetIndex, house, structure, corpus, ownership, address, helpText, updatedAt, photoUrl, photoCrop] = row;
-      state.records.set([streets[streetIndex] || '', house, structure, corpus, ownership].join('\u001f'), { address, help_text: helpText || '', updated_at: updatedAt || '', photo_url: photoUrl || '', photo_crop: photoCrop || '' });
+      state.records.set([streets[streetIndex] || '', house, structure, corpus, ownership].join('\u001f'), {
+        address, help_text: helpText || '', updated_at: updatedAt || '',
+        photo_url: photoUrl || '', photo_crop: photoCrop || ''
+      });
     }
   }
 
-  function start() {
-    if (!window.maplibregl) return setInfo('Карта', 'Не удалось загрузить библиотеку карты.', false);
-    state.map = new maplibregl.Map({ container: 'map', style: STYLE, center: MOSCOW, zoom: 16, pitch: 12, bearing: 0, maxZoom: 20, attributionControl: false });
-    state.map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), 'bottom-right');
-    state.map.addControl(new maplibregl.AttributionControl({ compact: true, customAttribution: '© OpenFreeMap · © OpenStreetMap contributors' }), 'bottom-left');
-    state.map.on('click', (event) => handleClick(event.lngLat.lng, event.lngLat.lat));
-    state.map.on('load', async () => { try { await loadData(); } catch (_) {} if (navigator.geolocation) navigator.geolocation.watchPosition(updateUserLocation, () => {}, { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }); });
-    state.map.on('error', () => { if (!state.map.isStyleLoaded()) setInfo('Карта', 'Не удалось загрузить векторную карту OpenFreeMap.', false); });
+  async function start() {
+    if (!window.L) { setInfo('Карта', 'Не удалось загрузить библиотеку карты.', false); return; }
+    state.map = L.map('map', { zoomControl: false, attributionControl: false }).setView(MOSCOW, 11);
+    L.control.zoom({ position: 'bottomright' }).addTo(state.map);
+    const osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' });
+    osm.addTo(state.map);
+    state.map.on('click', (event) => {
+      state.lastMapClickAt = performance.now();
+      handleClick(event);
+    });
+    installTouchFallback();
     $('search-form').addEventListener('submit', search);
-    $('info-close').addEventListener('click', () => { $('info-card').classList.add('is-hidden'); $('info-card').setAttribute('aria-hidden', 'true'); });
+    $('info-close').addEventListener('click', () => {
+      $('info-card').classList.add('is-hidden');
+      $('info-card').setAttribute('aria-hidden', 'true');
+    });
+    try { await loadData(); } catch (_) { /* Карта остаётся доступной даже без выгрузки. */ }
+    startUserGeolocation();
   }
 
   start();

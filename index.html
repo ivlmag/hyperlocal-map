@@ -6,7 +6,7 @@
     <title>hyperlocal</title>
     <meta name="description" content="Интерактивная карта зданий с адресами и городской справкой.">
     <link rel="icon" href="./favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
     <link rel="stylesheet" href="./styles.css?v=1ce8fc9e51ee">
   </head>
   <body>
@@ -32,10 +32,10 @@
           <p id="info-text">Кликните по контуру дома. Если по адресу есть запись в локальной БД, она появится здесь.</p>
         </aside>
       </section>
-      <footer class="footer"><a href="https://openfreemap.org/">OpenFreeMap</a><span>·</span><a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a></footer>
+      <footer class="footer"><a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a></footer>
     </main>
     <script src="./data.js?v=1ce8fc9e51ee"></script>
-    <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script src="./app.js?v=1ce8fc9e51ee" defer></script>
   </body>
 </html>
