@@ -98,13 +98,64 @@
     photo.src = url;
   }
 
-  function setInfo(title, text, withImage, photoUrl = '', photoCrop = '') {
+  function appendInlineMarkup(element, value) {
+    const fragments = String(value || '').split(/(\*\*[^*]+\*\*)/g);
+    for (const fragment of fragments) {
+      if (fragment.startsWith('**') && fragment.endsWith('**')) {
+        const strong = document.createElement('strong');
+        strong.textContent = fragment.slice(2, -2);
+        element.append(strong);
+      } else element.append(document.createTextNode(fragment));
+    }
+  }
+
+  function renderArticleMarkup(value) {
+    const container = $('article-content');
+    container.replaceChildren();
+    let list = null;
+    for (const rawLine of String(value || '').replace(/\r\n/g, '\n').split('\n')) {
+      const line = rawLine.trim();
+      const heading = line.match(/^(#{1,3})\s+(.+)$/);
+      const bullet = line.match(/^[-*]\s+(.+)$/);
+      const numbered = line.match(/^\d+[.)]\s+(.+)$/);
+      if (heading) {
+        list = null;
+        const tag = heading[1].length === 1 ? 'h2' : 'h3';
+        const node = document.createElement(tag); appendInlineMarkup(node, heading[2]); container.append(node); continue;
+      }
+      if (bullet || numbered) {
+        const tag = numbered ? 'ol' : 'ul';
+        if (!list || list.tagName.toLowerCase() !== tag) { list = document.createElement(tag); container.append(list); }
+        const item = document.createElement('li'); appendInlineMarkup(item, (bullet || numbered)[1]); list.append(item); continue;
+      }
+      list = null;
+      if (!line) continue;
+      const paragraph = document.createElement('p'); appendInlineMarkup(paragraph, rawLine); container.append(paragraph);
+    }
+  }
+
+  function openFullArticle() {
+    if (!state.currentArticle?.text?.trim()) return;
+    $('article-title').textContent = state.currentArticle.title;
+    renderArticleMarkup(state.currentArticle.text);
+    $('article-view').classList.remove('is-hidden');
+    $('article-view').setAttribute('aria-hidden', 'false');
+  }
+
+  function closeFullArticle() {
+    $('article-view').classList.add('is-hidden');
+    $('article-view').setAttribute('aria-hidden', 'true');
+  }
+
+  function setInfo(title, text, withImage, photoUrl = '', photoCrop = '', fullArticle = '') {
     const card = $('info-card');
     card.classList.remove('is-hidden');
     card.setAttribute('aria-hidden', 'false');
     $('info-title').textContent = title;
     $('info-text').textContent = text;
     $('info-image').classList.toggle('hidden', !withImage);
+    state.currentArticle = String(fullArticle || '').trim() ? { title, text: String(fullArticle) } : null;
+    $('info-article').classList.toggle('hidden', !state.currentArticle);
     renderInfoPhoto(photoUrl, photoCrop);
   }
 
@@ -172,7 +223,7 @@
     const address = record?.address || [street, house].filter(Boolean).join(', ') || fallbackName || 'Адрес не распознан';
     if (record) {
       const text = record.help_text.trim() || 'Запись найдена в локальной БД.\n\nСправка для этого адреса пока не заполнена.';
-      setInfo(address, text, Boolean(record.help_text.trim()), record.photo_url, record.photo_crop);
+      setInfo(address, text, Boolean(record.help_text.trim()), record.photo_url, record.photo_crop, record.full_article);
     } else {
       setInfo(address, 'Для этого адреса записи в выгрузке нет.', false);
     }
@@ -251,10 +302,10 @@
     }
     const streets = data.streets || [];
     for (const row of data.records || []) {
-      const [streetIndex, house, structure, corpus, ownership, address, helpText, updatedAt, photoUrl, photoCrop] = row;
+      const [streetIndex, house, structure, corpus, ownership, address, helpText, updatedAt, photoUrl, photoCrop, fullArticle] = row;
       state.records.set([streets[streetIndex] || '', house, structure, corpus, ownership].join('\u001f'), {
         address, help_text: helpText || '', updated_at: updatedAt || '',
-        photo_url: photoUrl || '', photo_crop: photoCrop || ''
+        photo_url: photoUrl || '', photo_crop: photoCrop || '', full_article: fullArticle || ''
       });
     }
   }
@@ -275,6 +326,8 @@
       $('info-card').classList.add('is-hidden');
       $('info-card').setAttribute('aria-hidden', 'true');
     });
+    $('info-article').addEventListener('click', openFullArticle);
+    $('article-close').addEventListener('click', closeFullArticle);
     try { await loadData(); } catch (_) { /* Карта остаётся доступной даже без выгрузки. */ }
     startUserGeolocation();
   }
