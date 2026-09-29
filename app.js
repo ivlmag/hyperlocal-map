@@ -99,7 +99,10 @@
   }
 
   function appendInlineMarkup(element, value) {
-    const fragments = String(value || '').split(/(\*\*[^*]+\*\*)/g);
+    // ChatGPT may place its internal citation placeholders into copied text.
+    // They do not contain a source URL and must never be shown to visitors.
+    const cleanValue = String(value || '').replace(/\s*:chatgpt-content-reference\{[^}]*\}/gi, '');
+    const fragments = cleanValue.split(/(\*\*[^*]+\*\*)/g);
     for (const fragment of fragments) {
       if (fragment.startsWith('**') && fragment.endsWith('**')) {
         const strong = document.createElement('strong');
@@ -156,6 +159,7 @@
     $('info-image').classList.toggle('hidden', !withImage);
     state.currentArticle = String(fullArticle || '').trim() ? { title, text: String(fullArticle) } : null;
     $('info-article').classList.toggle('hidden', !state.currentArticle);
+    card.classList.toggle('has-article', Boolean(state.currentArticle));
     renderInfoPhoto(photoUrl, photoCrop);
   }
 
