@@ -102,13 +102,38 @@
     // ChatGPT may place its internal citation placeholders into copied text.
     // They do not contain a source URL and must never be shown to visitors.
     const cleanValue = String(value || '').replace(/\s*:chatgpt-content-reference\{[^}]*\}/gi, '');
-    const fragments = cleanValue.split(/(\*\*[^*]+\*\*)/g);
+    const fragments = cleanValue.split(/(\*\*[^*]+\*\*|!?\[[^\]]*\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s<>"']+)/g);
     for (const fragment of fragments) {
       if (fragment.startsWith('**') && fragment.endsWith('**')) {
         const strong = document.createElement('strong');
         strong.textContent = fragment.slice(2, -2);
         element.append(strong);
-      } else element.append(document.createTextNode(fragment));
+        continue;
+      }
+      const markdownImage = fragment.match(/^!\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)$/i);
+      const markdownLink = fragment.match(/^\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)$/i);
+      const directUrl = fragment.match(/^https?:\/\/[^\s<>"']+/i);
+      const url = markdownImage?.[2] || markdownLink?.[2] || directUrl?.[0];
+      if (!url) {
+        element.append(document.createTextNode(fragment));
+        continue;
+      }
+      const cleanUrl = url.replace(/[.,;:!?]+$/, '');
+      const urlPath = cleanUrl.split(/[?#]/, 1)[0];
+      const isImage = Boolean(markdownImage) || /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(urlPath) || /\/special:filepath\//i.test(urlPath);
+      if (!isImage) {
+        element.append(document.createTextNode(fragment));
+        continue;
+      }
+      const image = document.createElement('img');
+      image.className = 'article-image';
+      image.src = cleanUrl;
+      image.alt = markdownImage?.[1] || markdownLink?.[1] || '';
+      image.loading = 'lazy';
+      image.decoding = 'async';
+      element.append(image);
+      const punctuation = url.slice(cleanUrl.length);
+      if (punctuation) element.append(document.createTextNode(punctuation));
     }
   }
 
