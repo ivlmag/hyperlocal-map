@@ -25,10 +25,11 @@
 
   function splitHouse(value) {
     const text = String(value || '').trim();
-    let match = text.match(/^(.+?)\s+(?:с|стр\.?|строение)\s*([\w/-]+)$/i);
-    if (match) return { house: match[1].trim(), structure: match[2].trim(), corpus: '', ownership: '' };
-    match = text.match(/^(.+?)\s+(?:к|корп\.?|корпус)\s*([\w/-]+)$/i);
-    if (match) return { house: match[1].trim(), structure: '', corpus: match[2].trim(), ownership: '' };
+    const part = '[0-9A-Za-zА-Яа-яЁё/-]+';
+    let match = text.match(new RegExp(`^(.+?)\\s+(?:с|стр\\.?|строение)\\s*(${part})$`, 'i'));
+    if (match) return { house: match[1].trim(), structure: match[2].trim().toLocaleUpperCase('ru-RU'), corpus: '', ownership: '' };
+    match = text.match(new RegExp(`^(.+?)\\s+(?:к|корп\\.?|корпус)\\s*(${part})$`, 'i'));
+    if (match) return { house: match[1].trim(), structure: '', corpus: match[2].trim().toLocaleUpperCase('ru-RU'), ownership: '' };
     return { house: text, structure: '', corpus: '', ownership: '' };
   }
 
